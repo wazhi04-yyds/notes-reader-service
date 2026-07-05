@@ -1,53 +1,55 @@
+import os  # 🆕 Imported to read environment targets
 import json
 import boto3
 import pymysql
 import logging
 from botocore.exceptions import ClientError
 
-# Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 def get_secret():
     """
-    Retrieve database credentials from AWS Secrets Manager test
+    Retrieve database credentials. Supports environment variable overrides for CI/CD.
     """
-    secret_name = "notes-app/database/credentials"
-    region_name = "eu-north-1"
+    # 🆕 ENTERPRISE PATTERN: Fallback to hardcoded values if environment variables aren't set
+    secret_name = os.environ.get("SECRET_NAME", "notes-app/database/credentials")
+    region_name = os.environ.get("AWS_REGION", "eu-north-1")
     
-    # Create a Secrets Manager client
     session = boto3.session.Session()
-    client = session.client(
-        service_name='secretsmanager',
-        region_name=region_name
-    )
+    client = session.client(service_name='secretsmanager', region_name=region_name)
     
     try:
         logger.info("Retrieving secret from Secrets Manager...")
-        get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
-        )
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
         logger.info("Successfully retrieved secret from Secrets Manager")
     except ClientError as e:
         logger.error(f"Error retrieving secret: {e}")
         raise e
     
-    # Parse the secret string
-    secret = json.loads(get_secret_value_response['SecretString'])
-    return secret
+    return json.loads(get_secret_value_response['SecretString'])
 
 def get_database_connection():
     """
-    Create and return a database connection using credentials from Secrets Manager
+    Create and return a database connection using configurations.
     """
     try:
-        # Get database credentials from Secrets Manager
+        # 🆕 ENVIRONMENT CHECK: If we are running local CI/CD tests, skip AWS entirely
+        if os.environ.get("EXECUTION_ENV") == "LOCAL_TEST":
+            logger.info("CI/CD Mode: Mocking database connection string...")
+            return pymysql.connect(
+                host="127.0.0.1", # Points to your local Docker Compose MySQL
+                user="test_user",
+                password="test_password",
+                database="notes_app_test",
+                port=3306
+            )
+
+        # Standard AWS Cloud Execution Path
         secret = get_secret()
-        
         logger.info(f"Connecting to database host: {secret['host']}")
         
-        # Create database connection
-        connection = pymysql.connect(
+        return pymysql.connect(
             host=secret['host'],
             user=secret['username'],
             password=secret['password'],
@@ -59,14 +61,9 @@ def get_database_connection():
             ssl={'ssl_disabled': False},
             connect_timeout=10
         )
-        
-        logger.info("Successfully connected to database")
-        return connection
-        
     except Exception as e:
         logger.error(f"Error connecting to database: {e}")
         raise e
-
 def get_notes_from_database(connection, search_term=None, limit=None, offset=None):
     """
     Retrieve notes from the database with optional filtering
@@ -191,3 +188,27 @@ def lambda_handler(event, context):
                 logger.info("Database connection closed")
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
+
+# 🆕 THIS ALLOWS "RUN PYTHON FILE IN TERMINAL" TO WORK
+if __name__ == "__main__":
+    import os
+    print("=========================================")
+    print(" Running Notes Reader Service Locally... ")
+    print("=========================================")
+    
+    # Force the code to use local testing configurations
+    os.environ["EXECUTION_ENV"] = "LOCAL_TEST"
+    
+    # Simulate a fake incoming AWS API Gateway event hitting your Lambda function
+    mock_aws_event = {
+        "queryStringParameters": {
+            "search": "meeting",
+            "limit": "5",
+            "offset": "0"
+        }
+    }
+    
+    # Run the handler function and print the final API output response string
+    final_response = lambda_handler(mock_aws_event, None)
+    print("\n--- LAMBDA OUTPUT RESPONSE ---")
+    print(json.dumps(final_response, indent=4))

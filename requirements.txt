@@ -1,0 +1,4 @@
+# it tells the container constructor which external dependencies to install in the container
+boto3
+pymysql
+pytest

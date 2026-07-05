@@ -1,0 +1,49 @@
+name: Local Enterprise CI Automation
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  continuous-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python Runtime Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Project Dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute Core Service Integration Check
+        shell: bash
+        run: |
+          echo "--> Triggering automated runtime compilation test..."
+          # Set the environment flag so the runner directs to localhost
+          export EXECUTION_ENV="LOCAL_TEST"
+          python lambda_function.py
+
+  continuous-delivery:
+    needs: continuous-integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Compile Target Lambda Container Image
+        shell: bash
+        run: |
+          echo "--> Initiating container asset packaging..."
+          COMMIT_SHA=$(git rev-parse --short HEAD || echo "local-build")
+          
+          # Compile the Docker image using your Dockerfile
+          docker build -t local-lambda-registry:${COMMIT_SHA} .
+          
+          echo "--> SUCCESS: Container artifact generated: local-lambda-registry:${COMMIT_SHA}"
